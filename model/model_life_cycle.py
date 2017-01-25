@@ -8,38 +8,27 @@ class ModelLifeCycle(object):
     """The initialization, summarization and saving of a model"""
 
     def __init__(self,
-                 model,
                  session,
                  base_dir,
-                 run_name):
+                 run_name,
+                 model_id=None):
         """
         Args:
-            model: arbitrary class
-                An arbitrary neural network model
             session: TFSession object
                 The tensorflow session object
             base_dir: string
                 The root directory for model execution
             run_name: string
                 The name of the run
+            model_id: string, optional
+                Indicates initialization from a previously-saved model
         """
-
-        self._model = model
         self._session = session
         self._base_dir = base_dir
         self._run_name = run_name
 
-    def initialize(self, model_id=None):
-        """This function initializes the model, either with random values for
-        all tradable parameters, or by restoring from a previously-saved model.
-
-        Args:
-            model_id: string, optional
-                Indicates initialization from a previously-saved model
-        """
-
         # The saver is responsible for serializing models/parameters
-        self._saver = tf.train.Saver(tf.all_variables())
+        self._saver = tf.train.Saver(tf.global_variables())
 
         self._out_dir = os.path.abspath(
             os.path.join(self._base_dir, "runs", self._run_name))
@@ -55,19 +44,28 @@ class ModelLifeCycle(object):
         # Either restore from previous model, or initialize anew
         if model_id is not None:
             logger.info('restore ' + model_id)
-            self._saver.restore(
-                self._session, self._checkpoint_prefix + model_id)
+            self._saver.restore(self._session,
+                                self._checkpoint_prefix + model_id)
         else:
-            self._session.run(tf.initialize_all_variables())
+            self._session.run(tf.global_variables_initializer())
 
     def summarize(self, name, summary, current_step):
-        if not hasattr(self, '_summary_writer'):
+        """Utility function to write summaries.
 
+        Args:
+            global_step: int
+                Global step of the training procedure
+        """
+
+        # Create directory and writer if it does not exist
+        if not hasattr(self, '_summary_writer' + name):
             summary_dir = os.path.join(self._out_dir, "summaries", name)
-            self._summary_writer = tf.train.SummaryWriter(
-                summary_dir, self._session.graph)
+            setattr(self,
+                    '_summary_writer' + name,
+                    tf.summary.FileWriter(summary_dir, self._session.graph))
 
-        self._summary_writer.add_summary(summary, current_step)
+        getattr(self, '_summary_writer' + name).add_summary(summary,
+                                                            current_step)
 
     def save(self, global_step):
         """This serializes the current model, i.e., learned parameter values.
@@ -76,8 +74,6 @@ class ModelLifeCycle(object):
             global_step: int
                 Global step of the training procedure
         """
-
-        path = self._saver.save(
-            self._session, self._checkpoint_prefix, global_step=global_step
-        )
+        path = self._saver.save(self._session, self._checkpoint_prefix,
+                                global_step=global_step)
         logger.info("Saved model checkpoint to {}\n".format(path))
